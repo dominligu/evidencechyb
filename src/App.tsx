@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 function formatDate(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
 
@@ -59,18 +59,109 @@ const td: CSSProperties = {
 
 export default function App() {
   const [personalNumber, setPersonalNumber] = useState("");
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [pin, setPin] = useState("");
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [error, setError] = useState("");
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [benefits, setBenefits] = useState<any[]>([]);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [employee, setEmployee] = useState<any>(null);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [errors, setErrors] = useState<any[]>([]);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [selectedPhoto, setSelectedPhoto] = useState<string | undefined>(undefined);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [page, setPage] = useState("dashboard");
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [benefitTitle, setBenefitTitle] = useState("");
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [benefitDescription, setBenefitDescription] = useState("");
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const [sendingBenefit, setSendingBenefit] = useState(false);
+  useEffect(() => {
+  const savedUser = localStorage.getItem("employee");
+
+  if (savedUser) {
+    setEmployee(JSON.parse(savedUser));
+  }
+}, []);
   const quality = Math.max(0, 100 - errors.length * 10);
   const qualityColor =
     quality >= 90 ? "#22c55e" : quality >= 70 ? "#f59e0b" : "#ef4444";
@@ -157,6 +248,10 @@ export default function App() {
       }
 
       setEmployee(data.employee);
+      localStorage.setItem(
+  "employee",
+  JSON.stringify(data.employee)
+);
       setErrors(data.errors || []);
       setBenefits(data.benefits || []);
       setSelectedPhoto(undefined);
@@ -168,6 +263,7 @@ export default function App() {
   };
 
   const logout = () => {
+    localStorage.removeItem("employee");
     setEmployee(null);
     setErrors([]);
     setBenefits([]);
