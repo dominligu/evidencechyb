@@ -214,12 +214,12 @@ const calculateFinalBonusAfterAttendance = () => {
 
     deduction += groupA * 250;
 
-    if (groupB > 3) {
-      deduction += (groupB - 3) * 100;
+    if (groupB > 1) {
+      deduction += (groupB - 1) * 100;
     }
 
-    if (groupC > 4) {
-      deduction += (groupC - 4) * 50;
+    if (groupC > 3) {
+      deduction += (groupC - 3) * 50;
     }
 
     return Math.max(0, 2000 - deduction);
