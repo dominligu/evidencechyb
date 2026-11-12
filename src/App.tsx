@@ -20,7 +20,6 @@ function normalizePhotoUrl(raw: string): string {
   if (match) {
     return `https://drive.google.com/file/d/${match[1]}/view`;
   }
-
   return raw;
 }
 const API_URL =
@@ -58,110 +57,174 @@ const td: CSSProperties = {
 };
 
 export default function App() {
+  const [adminStats, setAdminStats] = useState<any>(null);
+  const [userRole, setUserRole] = useState("");
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const [personalNumber, setPersonalNumber] = useState("");
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [pin, setPin] = useState("");
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [loading, setLoading] = useState(false);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [error, setError] = useState("");
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [benefits, setBenefits] = useState<any[]>([]);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [employee, setEmployee] = useState<any>(null);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [errors, setErrors] = useState<any[]>([]);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [selectedPhoto, setSelectedPhoto] = useState<string | undefined>(undefined);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [showBenefitForm, setShowBenefitForm] = useState(false);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [page, setPage] = useState("dashboard");
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [benefitTitle, setBenefitTitle] = useState("");
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [benefitDescription, setBenefitDescription] = useState("");
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
-
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
-  }
-}, []);
   const [sendingBenefit, setSendingBenefit] = useState(false);
-  useEffect(() => {
-  const savedUser = localStorage.getItem("employee");
+  const [dochazkaBody, setDochazkaBody] = useState(0);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  if (savedUser) {
-    setEmployee(JSON.parse(savedUser));
+  useEffect(() => {
+  const savedPersonalNumber = localStorage.getItem("personalNumber");
+  const savedPin = localStorage.getItem("pin");
+
+  if (savedPersonalNumber && savedPin) {
+    setPersonalNumber(savedPersonalNumber);
+    setPin(savedPin);
+
+    autoLogin(savedPersonalNumber, savedPin)
+      .finally(() => setInitialLoading(false));
+  } else {
+    setInitialLoading(false);
   }
 }, []);
+
+  const autoLogin = async (savedPersonalNumber: string, savedPin: string) => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          personalNumber: savedPersonalNumber,
+          pin: savedPin,
+        }),
+      });
+
+      const data = await response.json();
+      console.log("AUTOLOGIN DATA:", data);
+
+      if (!data.success) {
+        setError(data.message || "Přihlášení se nezdařilo.");
+        setLoading(false);
+        return;
+      }
+
+      await loadUserRole(data.employee.personalNumber);
+      setEmployee(data.employee);
+      console.log("EMPLOYEE NASTAVEN");
+
+localStorage.setItem(
+  "employee",
+  JSON.stringify(data.employee)
+);
+
+localStorage.setItem(
+  "personalNumber",
+  savedPersonalNumber
+);
+
+localStorage.setItem(
+  "pin",
+  savedPin
+);
+      setErrors(data.errors || []);
+      setBenefits(data.benefits || []);
+      setSelectedPhoto(undefined);
+    } catch {
+      setError("Nepodařilo se spojit se serverem.");
+    }
+
+    setLoading(false);
+  };
+
+  function calculateCurrentBonus() {
+    let deduction = 0;
+
+    const groupA = errors.filter(
+      (e: { kategorie: string; }) => e.kategorie === "1. PROŠLO K ZÁKAZNÍKOVI" ||
+        e.kategorie === "4. CHYBNÉ BALENÍ" ||
+        e.kategorie === "6. PŘÍJEM REALIZACE"
+    ).length;
+
+    const groupB = errors.filter(
+      (e: { kategorie: string; }) => e.kategorie === "2. ZPOŽDĚNÉ ODESLÁNÍ" ||
+        e.kategorie === "5. PŘÍJEM"
+    ).length;
+
+    const groupC = errors.filter(
+      (e: { kategorie: string; }) => e.kategorie === "3. ZASTAVENO KONTROLOU" ||
+        e.kategorie === "7. NEPOŘÁDEK"
+    ).length;
+
+    deduction += groupA * 250;
+    if (groupB > 1) deduction += (groupB - 1) * 100;
+    if (groupC > 3) deduction += (groupC - 3) * 50;
+
+    return Math.max(0, 2000 - deduction);
+  }
+
+  const currentBonus = calculateCurrentBonus();
+  const bonusPercent = (currentBonus / 2000) * 100;
+
+  useEffect(() => {
+    if (!personalNumber) return;
+
+    fetch(`${API_URL}?action=getDochazka&osCislo=${personalNumber}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setDochazkaBody(Number(data.body) || 0);
+      })
+      .catch((err) => console.error("Chyba načtení docházky:", err));
+  }, [personalNumber]);
+const calculateFinalBonusAfterAttendance = () => {
+    const sortedErrors = [...errors].sort(
+      (a, b) =>
+        new Date(b.reseno || "").getTime() - new Date(a.reseno || "").getTime()
+    );
+
+    const remainingErrors = sortedErrors.slice(dochazkaBody);
+
+    let deduction = 0;
+
+    const groupA = remainingErrors.filter(
+      (e) =>
+        e.kategorie === "1. PROŠLO K ZÁKAZNÍKOVI" ||
+        e.kategorie === "4. CHYBNÉ BALENÍ" ||
+        e.kategorie === "6. PŘÍJEM REALIZACE"
+    ).length;
+
+    const groupB = remainingErrors.filter(
+      (e) =>
+        e.kategorie === "2. ZPOŽDĚNÉ ODESLÁNÍ" ||
+        e.kategorie === "5. PŘÍJEM"
+    ).length;
+
+    const groupC = remainingErrors.filter(
+      (e) =>
+        e.kategorie === "3. ZASTAVENO KONTROLOU" ||
+        e.kategorie === "7. NEPOŘÁDEK"
+    ).length;
+
+    deduction += groupA * 250;
+
+    if (groupB > 3) {
+      deduction += (groupB - 3) * 100;
+    }
+
+    if (groupC > 4) {
+      deduction += (groupC - 4) * 50;
+    }
+
+    return Math.max(0, 2000 - deduction);
+  };
+  const finalBonus = calculateFinalBonusAfterAttendance();
   const quality = Math.max(0, 100 - errors.length * 10);
   const qualityColor =
     quality >= 90 ? "#22c55e" : quality >= 70 ? "#f59e0b" : "#ef4444";
@@ -222,8 +285,40 @@ export default function App() {
 
     setSendingBenefit(false);
   };
+  async function loadUserRole(osCislo: any) {
+    try {
+      const response = await fetch(
+        `${API_URL}?action=getUser&osCislo=${osCislo}`
+      );
 
+      const user = await response.json();
+
+      setUserRole(user.role);
+
+if (user.role === "superadmin") {
+
+  const usersResponse = await fetch(
+    `${API_URL}?action=getAllUsers`
+  );
+
+  const users = await usersResponse.json();
+
+  setAllUsers(Array.isArray(users) ? users : []);
+
+  const statsResponse = await fetch(
+    `${API_URL}?action=getAdminStats`
+  );
+
+  const stats = await statsResponse.json();
+
+  setAdminStats(stats);
+}
+    } catch (error) {
+      console.error("Chyba načtení role:", error);
+    }
+  }
   const handleLogin = async () => {
+
     setLoading(true);
     setError("");
 
@@ -247,10 +342,21 @@ export default function App() {
         return;
       }
 
+      await loadUserRole(data.employee.personalNumber);
+
       setEmployee(data.employee);
       localStorage.setItem(
-  "employee",
-  JSON.stringify(data.employee)
+  "personalNumber",
+  personalNumber
+);
+
+localStorage.setItem(
+  "pin",
+  pin
+);
+
+      localStorage.setItem("employee",
+      JSON.stringify(data.employee)
 );
       setErrors(data.errors || []);
       setBenefits(data.benefits || []);
@@ -264,6 +370,8 @@ export default function App() {
 
   const logout = () => {
     localStorage.removeItem("employee");
+    localStorage.removeItem("personalNumber");
+localStorage.removeItem("pin");
     setEmployee(null);
     setErrors([]);
     setBenefits([]);
@@ -354,6 +462,24 @@ export default function App() {
       </div>
     );
   }
+  if (initialLoading) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
+        color: "white",
+        fontSize: "24px",
+        fontWeight: "bold",
+      }}
+    >
+      📊 Načítání aplikace...
+    </div>
+  );
+}
   if (!employee) {
     return (
       <div
@@ -536,6 +662,81 @@ export default function App() {
           </div>
         </div>
 
+        {userRole === "superadmin" && (
+          <div
+            style={{
+              background: "linear-gradient(135deg,#dc2626,#991b1b)",
+              color: "white",
+              padding: 25,
+              borderRadius: 24,
+              marginBottom: 25,
+              boxShadow: "0 15px 30px rgba(220,38,38,0.3)",
+            }}
+          >
+            <h2 style={{ margin: 0 }}>👑 SUPERADMIN DASHBOARD</h2>
+
+            {adminStats && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))",
+                  gap: 15,
+                  marginBottom: 20,
+                  marginTop: 20,
+                }}
+              >
+                <div
+                  style={{
+                    background: "#2563eb",
+                    padding: 20,
+                    borderRadius: 16,
+                  }}
+                >
+                  <div>👥 Zaměstnanci</div>
+                  <h2>{adminStats.employeesCount}</h2>
+                </div>
+
+                <div
+                  style={{
+                    background: "#dc2626",
+                    padding: 20,
+                    borderRadius: 16,
+                  }}
+                >
+                  <div>⚠️ Chyby</div>
+                  <h2>{adminStats.errorsCount}</h2>
+                </div>
+              </div>
+            )}
+
+            <p>Počet zaměstnanců: {allUsers.length}</p>
+
+            <div
+              style={{
+                maxHeight: 300,
+                overflowY: "auto",
+                marginTop: 20,
+              }}
+            >
+              {allUsers.map((user) => (
+                <div
+                  key={user.osCislo}
+                  style={{
+                    background: "rgba(255,255,255,0.1)",
+                    padding: 10,
+                    borderRadius: 10,
+                    marginBottom: 10,
+                  }}
+                >
+                  {user.jmeno} | {user.osCislo} | {user.smena}
+                </div>
+              ))}
+            </div>
+
+            <p style={{ marginTop: 10 }}>Přihlášen jako SuperAdmin.</p>
+          </div>
+        )}
+
         <div
           style={{
             display: "grid",
@@ -574,7 +775,7 @@ export default function App() {
             
             <div
               style={{
-                color: "#64748b",
+                color: "#040505",
                 marginTop: 10,
                 fontSize: 18,
               }}
@@ -619,7 +820,7 @@ export default function App() {
   </div>
   <div
     style={{
-      color: "#64748b",
+      color: "#040405",
       marginTop: 10,
     }}
   >
@@ -628,25 +829,76 @@ export default function App() {
 </div>
 
           <div style={card}>
-            <div style={label}>🏆 Moje skóre</div>
-            <div
-              style={{
-                fontSize: 38,
-                fontWeight: "bold",
-                color: "#2563eb",
-              }}
-            >
-              {Math.max(0, 10 - errors.length)}
-            </div>
-            <div
-              style={{
-                color: "#64748b",
-                marginTop: 10,
-              }}
-            >
-              Aktuální skóre
-            </div>
-          </div>
+  <div style={label}>💰 Bonus</div>
+
+  <div
+    style={{
+      fontSize: 40,
+      fontWeight: "bold",
+      color: "#2563eb",
+    }}
+  >
+    {currentBonus.toLocaleString("cs-CZ")} Kč
+    <div
+  style={{
+    marginTop: 10,
+    color: "#64748b",
+    fontSize: 13,
+  }}
+>
+  Po uzávěrce: {finalBonus.toLocaleString("cs-CZ")} Kč
+</div>
+  </div>
+
+  <div
+    style={{
+      width: "100%",
+      height: 18,
+      background: "#e5e7eb",
+      borderRadius: "999px",
+      overflow: "hidden",
+      marginTop: 10,
+      marginBottom: 10,
+    }}
+  >
+    <div
+      style={{
+        width: `${bonusPercent}%`,
+        height: "100%",
+        background:
+          bonusPercent >= 75
+            ? "#22c55e"
+            : bonusPercent >= 50
+            ? "#f59e0b"
+            : "#ef4444",
+      }}
+    />
+  </div>
+
+  <div
+    style={{
+      color: "#010205",
+      marginTop: 10,
+    }}
+  >
+    Aktuální bonus z 2 000 Kč
+    <div
+  style={{
+    color: "#64748b",
+    marginTop: 6,
+    fontSize: 13,
+  }}
+>
+  Uzávěrka za{" "}
+  {new Date(
+    new Date().getFullYear(),
+    new Date().getMonth() + 1,
+    0
+  ).getDate() - new Date().getDate()}{" "}
+  dní
+</div>
+  </div>
+</div>
 
           <div style={card}>
             <div style={label}>🤝 Schůzky</div>
@@ -665,14 +917,14 @@ export default function App() {
               onClick={() => alert("Musíme to opravit 🫡 .")}
               style={{
                 width: "100%",
-                background: "#2563eb",
+                background: "#0938b9",
                 color: "white",
                 border: "none",
                 borderRadius: 12,
                 padding: "12px 16px",
                 cursor: "pointer",
                 fontWeight: "bold",
-                fontSize: 14,
+                fontSize: 17,
               }}
             >
               📅 Požádat o schůzku
@@ -680,23 +932,23 @@ export default function App() {
           </div>
 
           <div style={card}>
-            <div style={label}>📈 Aktivita</div>
+            <div style={label}>⌚️ Docházka</div>
+           <div
+  style={{
+    fontSize: 38,
+    fontWeight: "bold",
+    color: "#8b5cf6",
+  }}
+>
+  {dochazkaBody}
+</div>
             <div
               style={{
-                fontSize: 38,
-                fontWeight: "bold",
-                color: "#8b5cf6",
-              }}
-            >
-              0
-            </div>
-            <div
-              style={{
-                color: "#64748b",
+                color: "#040505",
                 marginTop: 10,
               }}
             >
-              Aktivit tento měsíc
+              Body docházky tento měsíc
             </div>
           </div>
         </div>
@@ -746,7 +998,7 @@ export default function App() {
                 minHeight: 120,
                 padding: 12,
                 borderRadius: 8,
-                border: "1px solid #cbd5e1",
+                border: "1px solid #c8cfd6",
                 boxSizing: "border-box",
               }}
             />
@@ -754,7 +1006,7 @@ export default function App() {
             <div style={{ marginTop: 15 }}>
               <button
                 style={{
-                  background: "#22c55e",
+                  background: "#26d420",
                   color: "white",
                   border: "none",
                   padding: "10px 16px",
@@ -788,7 +1040,7 @@ export default function App() {
             background: "white",
             borderRadius: 20,
             padding: 24,
-            border: "1px solid #e2e8f0",
+            border: "1px solid #1f569c",
             boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
             overflowX: "auto",
           }}
@@ -822,47 +1074,79 @@ export default function App() {
                 </tr>
               ) : (
                 [...errors]
-                  .sort(
-                    (a, b) =>
-                      new Date(b.zpusobeno).getTime() -
-                      new Date(a.zpusobeno).getTime()
-                  )
+  .sort(
+    (a, b) =>
+      new Date(b.reseno || "").getTime() -
+      new Date(a.reseno || "").getTime()
+  )
                   .map((item, index) => (
                     <tr
                       key={index}
                       style={{
                         background: item.foto
-                          ? "#fefce8"
+                          ? "#f8e42a"
                           : index % 2 === 0
                             ? "#ffffff"
-                            : "#f8fafc",
+                            : "#ffffff",
                       }}
                     >
                       <td style={td}>{formatDate(item.zpusobeno)}</td>
                       <td style={td}>{formatDate(item.reseno)}</td>
                       <td style={td}>
-                        <span
-                          style={{
-                            background:
-                              item.kategorie === "Picking"
-                                ? "#fee2e2"
-                                : item.kategorie === "Balení"
-                                  ? "#dbeafe"
-                                  : "#dcfce7",
-                            color:
-                              item.kategorie === "Picking"
-                                ? "#991b1b"
-                                : item.kategorie === "Balení"
-                                  ? "#1e40af"
-                                  : "#166534",
-                            padding: "4px 10px",
-                            borderRadius: "999px",
-                            fontSize: "12px",
-                            fontWeight: "bold",
-                          }}
-                        >
-                          {item.kategorie}
-                        </span>
+                       <span
+  style={{
+    background: (() => {
+      switch (item.kategorie) {
+        case "1. PROŠLO K ZÁKAZNÍKOVI":
+          return "#FEE2E2";
+        case "2. ZPOŽDĚNÉ ODESLÁNÍ":
+          return "#FFEDD5";
+        case "3. ZASTAVENO KONTROLOU":
+          return "#FEF3C7";
+        case "4. CHYBNÉ BALENÍ":
+          return "#EDE9FE";
+        case "5. PŘÍJEM":
+          return "#DCFCE7";
+        case "6. PŘÍJEM":
+          return "#CFFAFE";
+        case "7. NEPOŘÁDEK":
+          return "#DBEAFE";
+        default:
+          return "#F3F4F6";
+      }
+    })(),
+
+    color: (() => {
+      switch (item.kategorie) {
+        case "1. PROŠLO K ZÁKAZNÍKOVI":
+          return "#B91C1C";
+        case "2. ZPOŽDĚNÉ ODESLÁNÍ":
+          return "#C2410C";
+        case "3. ZASTAVENO KONTROLOU":
+          return "#92400E";
+        case "4. CHYBNÉ BALENÍ":
+          return "#6D28D9";
+        case "5. PŘÍJEM":
+          return "#15803D";
+        case "6. PŘÍJEM REALIZACE":
+          return "#0F766E";
+        case "7. NEPOŘÁDEK":
+          return "#1D4ED8";
+        default:
+          return "#374151";
+      }
+    })(),
+
+    padding: "6px 12px",
+    borderRadius: "12px",
+    fontSize: "12px",
+    fontWeight: 700,
+    display: "inline-block",
+    textAlign: "center",
+  }}
+>
+  {item.kategorie}
+</span>
                       </td>
                       <td style={td}>{item.reference}</td>
                       <td style={td}>{item.popis}</td>
