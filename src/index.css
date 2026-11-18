@@ -55,20 +55,65 @@ body {
   }
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #0f172a;
+}
+
+button {
+  touch-action: manipulation;
+  transition: transform 160ms ease, filter 160ms ease;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-2px);
+  filter: brightness(1.06);
+}
+
+button:not(:disabled):active {
+  transform: translateY(0) scale(0.97);
+  filter: brightness(0.98);
+}
+
+button:focus-visible {
+  outline: 3px solid rgba(96, 165, 250, 0.75);
+  outline-offset: 3px;
+}
+
+.benefit-form-field {
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.benefit-form-field::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+.benefit-form-field:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .benefit-form-field {
+    transition: none;
+  }
+}
+
+* {
   box-sizing: border-box;
 }
 
-body {
+#root {
+  width: 100%;
+  max-width: none;
+  min-height: 100svh;
   margin: 0;
+  border: none;
+  text-align: left;
 }
 
 h1,

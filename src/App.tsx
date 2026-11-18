@@ -51,28 +51,184 @@ type AdminViewResponse = {
   dochazkaBody?: number | string;
 };
 
-function formatDate(value: unknown): string {
+type Language = "cs" | "en";
+
+const translations = {
+  cs: {
+    evidence: "Evidence chyb",
+    loading: "Načítání aplikace...",
+    login: "Přihlásit",
+    loggingIn: "Přihlašování...",
+    loginSubtitle: "Přihlášení zaměstnance",
+    personalNumber: "Osobní číslo",
+    pin: "PIN",
+    personalNumberLabel: "Osobní číslo:",
+    benefitTitle: "Nahlášení přínosu",
+    benefitPlaceholder: "Co jsi udělal pro sklad?",
+    benefitDetail: "Detailní popis...",
+    send: "Odeslat",
+    sending: "Odesílám...",
+    back: "Zpět",
+    logout: "Odhlásit",
+    returnToAdmin: "Zpět na můj účet",
+    history: "Historie chyb",
+    caused: "Způsobeno",
+    resolved: "Řešeno",
+    category: "Kategorie",
+    reference: "FA/OBJ/BOX",
+    description: "Popis chyby",
+    photo: "Foto",
+    noErrors: "Nebyly nalezeny žádné chyby.",
+    noErrorsCongrats: "Gratulujeme, nemáte evidované žádné chyby.",
+    photoTitle: "Zobrazit fotografii",
+    photoAlt: "Fotka chyby",
+    allGood: "Bez dopadu na bonus",
+  },
+  en: {
+    evidence: "Error tracking",
+    loading: "Loading application...",
+    login: "Log in",
+    loggingIn: "Logging in...",
+    loginSubtitle: "Employee login",
+    personalNumber: "Employee number",
+    pin: "PIN",
+    personalNumberLabel: "Employee number:",
+    benefitTitle: "Report a contribution",
+    benefitPlaceholder: "What did you do to help the warehouse?",
+    benefitDetail: "Detailed description...",
+    send: "Submit",
+    sending: "Submitting...",
+    back: "Back",
+    logout: "Log out",
+    returnToAdmin: "Back to my account",
+    history: "Error history",
+    caused: "Occurred",
+    resolved: "Resolved",
+    category: "Category",
+    reference: "FA/OBJ/BOX",
+    description: "Error description",
+    photo: "Photo",
+    noErrors: "No errors found.",
+    noErrorsCongrats: "Congratulations, you have no recorded errors.",
+    photoTitle: "View photo",
+    photoAlt: "Error photo",
+    allGood: "No impact on bonus",
+  },
+} as const;
+
+function formatDate(value: unknown, language: Language): string {
   if (value === null || value === undefined || value === "") return "—";
 
   const date = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(date.getTime())) return String(value);
 
-  return new Intl.DateTimeFormat("cs-CZ", {
+  return new Intl.DateTimeFormat(language === "en" ? "en-GB" : "cs-CZ", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
   }).format(date);
 }
 
-function normalizePhotoUrl(raw: string): string {
-  if (!raw) return "";
+function parseErrorDate(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value === null || value === undefined || value === "") return null;
 
-  const match = raw.match(/\/d\/([^/]+)/);
-  if (match) {
-    return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w1600`;
+  const raw = String(value).trim();
+  const dotted = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s|$)/);
+  if (dotted) {
+    return new Date(
+      Number(dotted[3]),
+      Number(dotted[2]) - 1,
+      Number(dotted[1])
+    );
   }
 
-  return raw;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getErrorMonthKey(value: unknown): string {
+  const date = parseErrorDate(value);
+  if (!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function normalizeHistoryErrors(rawHistory: unknown): ErrorEntry[] {
+  if (!Array.isArray(rawHistory)) return [];
+
+  return rawHistory.map((raw) => {
+    if (Array.isArray(raw)) {
+      return {
+        osoba: String(raw[1] ?? ""),
+        zpusobeno: raw[2],
+        reseno: raw[4],
+        kategorie: String(raw[5] ?? ""),
+        reference: String(raw[6] ?? ""),
+        popis: String(raw[7] ?? ""),
+        foto: String(raw[8] ?? ""),
+      } as ErrorEntry;
+    }
+    if (!raw || typeof raw !== "object") return {};
+    const row = raw as Record<string, unknown>;
+
+    return {
+      osoba: String(row.osoba ?? row.jmeno ?? row.name ?? ""),
+      zpusobeno: row.zpusobeno ?? row.caused ?? row.datum ?? row.date,
+      reseno: row.reseno ?? row.resolved ?? row.resenoDne,
+      kategorie: String(row.kategorie ?? row.category ?? ""),
+      reference: String(row.reference ?? row.ref ?? row.fafObjBox ?? ""),
+      popis: String(row.popis ?? row.description ?? ""),
+      foto: String(row.foto ?? row.photo ?? ""),
+    } as ErrorEntry;
+  }).filter((entry) =>
+    entry.zpusobeno !== undefined ||
+    entry.reseno !== undefined ||
+    entry.kategorie ||
+    entry.reference ||
+    entry.popis
+  );
+}
+
+function mergeErrorEntries(current: ErrorEntry[], history: ErrorEntry[]): ErrorEntry[] {
+  const merged = new Map<string, ErrorEntry>();
+
+  const getKey = (entry: ErrorEntry) =>
+    [
+      String(entry.zpusobeno ?? ""),
+      String(entry.reseno ?? ""),
+      entry.kategorie ?? "",
+      entry.reference ?? "",
+      entry.popis ?? "",
+    ].join("|");
+
+  current.forEach((entry) => merged.set(getKey(entry), entry));
+  history.forEach((entry) => merged.set(getKey(entry), entry));
+  return [...merged.values()];
+}
+
+function getDrivePhotoId(raw: string): string {
+  const trimmed = raw.trim();
+
+  const id = (
+    trimmed.match(/\/d\/([^/?#]+)/)?.[1] ||
+    trimmed.match(/[?&]id=([^&#]+)/)?.[1] ||
+    ""
+  ).replace(/&.*$/, "");
+
+  return id ? decodeURIComponent(id) : "";
+}
+
+function getPhotoOriginalUrl(raw: string): string {
+  const trimmed = raw.trim();
+  const driveId =
+    trimmed.match(/\/d\/([^/?#]+)/)?.[1] ||
+    trimmed.match(/[?&]id=([^&#]+)/)?.[1];
+
+  if (driveId) {
+    return `https://drive.google.com/file/d/${decodeURIComponent(driveId)}/view`;
+  }
+
+  return trimmed;
 }
 
 const API_URL =
@@ -83,6 +239,61 @@ const card: CSSProperties = {
   borderRadius: 20,
   padding: 24,
   boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  minHeight: 220,
+  height: "100%",
+};
+
+const actionButtonBase: CSSProperties = {
+  minHeight: 46,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 9,
+  padding: "11px 18px",
+  border: "1px solid transparent",
+  borderRadius: 12,
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 700,
+  letterSpacing: ".1px",
+  transition: "transform .16s ease, filter .16s ease, box-shadow .16s ease",
+};
+
+const primaryActionButton: CSSProperties = {
+  ...actionButtonBase,
+  color: "#fff",
+  background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+  borderColor: "rgba(29, 78, 216, .7)",
+  boxShadow: "0 8px 18px rgba(37, 99, 235, .22)",
+};
+
+const secondaryActionButton: CSSProperties = {
+  ...actionButtonBase,
+  minHeight: 42,
+  color: "#1e293b",
+  background: "linear-gradient(180deg, #fff, #f8fafc)",
+  borderColor: "#dbe3ef",
+  borderRadius: 999,
+  boxShadow: "0 3px 9px rgba(15, 23, 42, .12)",
+  fontSize: 13,
+};
+
+const dangerActionButton: CSSProperties = {
+  ...actionButtonBase,
+  color: "#fff",
+  background: "linear-gradient(135deg, #be123c, #881337)",
+  borderColor: "rgba(136, 19, 55, .7)",
+  borderRadius: 999,
+  boxShadow: "0 8px 18px rgba(136, 19, 55, .25)",
+};
+
+const photoActionButton: CSSProperties = {
+  ...primaryActionButton,
+  width: 40,
+  minHeight: 38,
+  padding: 0,
+  borderRadius: 10,
+  fontSize: 16,
 };
 
 const label: CSSProperties = {
@@ -91,6 +302,10 @@ const label: CSSProperties = {
   fontWeight: "bold",
   marginBottom: 10,
   textTransform: "uppercase",
+  minHeight: 28,
+  lineHeight: "28px",
+  display: "flex",
+  alignItems: "center",
 };
 
 const th: CSSProperties = {
@@ -109,6 +324,12 @@ const td: CSSProperties = {
 };
 
 export default function App() {
+  const [language, setLanguage] = useState<Language>(
+    () => (localStorage.getItem("language") === "en" ? "en" : "cs")
+  );
+  const t = (key: keyof typeof translations.cs) =>
+    translations[language][key];
+
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [personalNumber, setPersonalNumber] = useState(
     () => localStorage.getItem("personalNumber") || ""
@@ -123,6 +344,12 @@ export default function App() {
   const [errors, setErrors] = useState<ErrorEntry[]>([]);
   const [benefits, setBenefits] = useState<Benefit[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<string | undefined>(undefined);
+  const [selectedHistoryMonth, setSelectedHistoryMonth] = useState(
+    () => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+  );
   const [benefitTitle, setBenefitTitle] = useState("");
   const [benefitDescription, setBenefitDescription] = useState("");
   const [sendingBenefit, setSendingBenefit] = useState(false);
@@ -136,14 +363,45 @@ export default function App() {
     useState<AdminViewSnapshot | null>(null);
   const [adminViewLoading, setAdminViewLoading] = useState(false);
   const [adminViewError, setAdminViewError] = useState("");
-  const isBrigadnik = [employee?.role, userRole].some((role) =>
-    ["brigadnik", "brigádník"].includes(role?.trim().toLowerCase() ?? "")
+  const toggleLanguage = () => {
+    const nextLanguage = language === "cs" ? "en" : "cs";
+    setLanguage(nextLanguage);
+    localStorage.setItem("language", nextLanguage);
+  };
+  const translateCategory = (category?: string) => {
+    if (language !== "en" || !category) return category || "—";
+    const categoryTranslations: Record<string, string> = {
+      "1. PROŠLO K ZÁKAZNÍKOVI": "1. Passed to customer",
+      "2. ZPOŽDĚNÉ ODESLÁNÍ": "2. Delayed dispatch",
+      "3. ZASTAVENO KONTROLOU": "3. Held by inspection",
+      "4. CHYBNÉ BALENÍ": "4. Incorrect packaging",
+      "5. PŘÍJEM": "5. Incoming goods",
+      "6. PŘÍJEM REALIZACE": "6. Receiving / implementation",
+      "7. NEPOŘÁDEK": "7. Untidy area",
+    };
+    return categoryTranslations[category] || category;
+  };
+  const normalizeRole = (value?: string) =>
+    value
+      ?.trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") ?? "";
+
+  const isBrigadnik = [employee?.role, employee?.position, userRole].some(
+    (role) => normalizeRole(role) === "brigadnik"
   );
 
-  const sortedForForgiveness = [...errors].sort(
+  const today = new Date();
+  const currentMonthKey = getErrorMonthKey(today);
+  const currentMonthErrors = errors.filter(
+    (error) => getErrorMonthKey(error.reseno) === currentMonthKey
+  );
+
+  const sortedForForgiveness = [...currentMonthErrors].sort(
     (a, b) =>
-      new Date(a.reseno || "").getTime() -
-      new Date(b.reseno || "").getTime()
+      (parseErrorDate(a.reseno)?.getTime() ?? 0) -
+      (parseErrorDate(b.reseno)?.getTime() ?? 0)
   );
   const groupAErrors = sortedForForgiveness.filter(
     (error) =>
@@ -175,12 +433,41 @@ export default function App() {
     0
   );
 
-  const currentMonth = new Date().toLocaleDateString("cs-CZ", {
+  const currentMonth = new Date().toLocaleDateString(language === "en" ? "en-GB" : "cs-CZ", {
     month: "long",
     year: "numeric",
   });
 
-  const today = new Date();
+  const historyMonthKeys = [...new Set([
+    currentMonthKey,
+    ...errors
+      .map((error) => getErrorMonthKey(error.reseno))
+      .filter(Boolean),
+  ])].sort((a, b) => b.localeCompare(a));
+
+  const selectedHistoryErrors = selectedHistoryMonth === "all"
+    ? errors
+    : errors.filter(
+        (error) => getErrorMonthKey(error.reseno) === selectedHistoryMonth
+      );
+
+  const getPreviousMonthKey = (monthKey: string): string => {
+    const [year, month] = monthKey.split("-").map(Number);
+    const previous = new Date(year, month - 2, 1);
+    return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
+  };
+
+  const previousHistoryMonthKey =
+    selectedHistoryMonth === "all"
+      ? ""
+      : getPreviousMonthKey(selectedHistoryMonth);
+  const previousHistoryErrors =
+    previousHistoryMonthKey
+      ? errors.filter(
+          (error) => getErrorMonthKey(error.reseno) === previousHistoryMonthKey
+        )
+      : [];
+
   const daysLeft =
     new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate() -
     today.getDate();
@@ -206,7 +493,7 @@ export default function App() {
     remainingCredit -= deduction;
   }
 
-  const quality = Math.max(0, 100 - errors.length * 10);
+  const quality = Math.max(0, 100 - currentMonthErrors.length * 10);
   const qualityColor =
     quality >= 90 ? "#22c55e" : quality >= 70 ? "#f59e0b" : "#ef4444";
 
@@ -243,6 +530,24 @@ export default function App() {
       }
     } catch (err) {
       console.error("Chyba načtení role:", err);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async (osCislo: string) => {
+    try {
+      const response = await fetch(
+        `${API_URL}?action=getHistory&osCislo=${encodeURIComponent(osCislo)}`
+      );
+      const data = await response.json();
+      const rawHistory =
+        data.history ?? data.errors ?? data.data ?? data.records ?? [];
+      const historyEntries = normalizeHistoryErrors(rawHistory);
+
+      if (historyEntries.length > 0) {
+        setErrors((current) => mergeErrorEntries(current, historyEntries));
+      }
+    } catch (err) {
+      console.error("Chyba načtení historie chyb:", err);
     }
   }, []);
 
@@ -283,6 +588,7 @@ export default function App() {
         setBenefits(Array.isArray(data.benefits) ? data.benefits : []);
         localStorage.setItem("employee", JSON.stringify(restoredEmployee));
         await loadUserRole(restoredEmployee.personalNumber);
+        await loadHistory(restoredEmployee.personalNumber);
       } catch {
         setError("Nepodařilo se spojit se serverem.");
       } finally {
@@ -291,7 +597,7 @@ export default function App() {
     }
 
     void restoreSession();
-  }, [loadUserRole]);
+  }, [loadUserRole, loadHistory]);
 
   const attendancePersonalNumber =
     adminViewSnapshot?.employee.personalNumber || personalNumber;
@@ -333,6 +639,8 @@ export default function App() {
       setErrors(Array.isArray(data.errors) ? data.errors : []);
       setBenefits(Array.isArray(data.benefits) ? data.benefits : []);
       setSelectedPhoto(undefined);
+
+      await loadHistory(loggedEmployee.personalNumber);
 
       localStorage.setItem("employee", JSON.stringify(loggedEmployee));
       localStorage.setItem("personalNumber", loggedEmployee.personalNumber);
@@ -411,6 +719,7 @@ export default function App() {
       setBenefits(Array.isArray(data.benefits) ? data.benefits : []);
       setDochazkaBody(Number(data.dochazkaBody) || 0);
       setUserRole(data.userRole || data.employee.role || "");
+      await loadHistory(data.employee.personalNumber);
       setPage("dashboard");
     } catch {
       setAdminViewError("Nepodařilo se spojit se serverem.");
@@ -485,73 +794,90 @@ export default function App() {
       >
         <div
           style={{
-            maxWidth: 800,
-            margin: "50px auto",
+            maxWidth: 760,
+            margin: "clamp(16px, 6vh, 56px) auto",
             ...card,
+            padding: "clamp(22px, 5vw, 36px)",
+            border: "1px solid #e2e8f0",
           }}
         >
-          <h2>⭐ Nahlášení přínosu</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 24 }}>
+            <h2 style={{ color: "#172554", fontWeight: 750, margin: 0 }}>
+              ⭐ {t("benefitTitle")}
+            </h2>
+            <button type="button" onClick={toggleLanguage} style={secondaryActionButton}>
+              {language === "cs" ? "🇬🇧 English" : "🇨🇿 Čeština"}
+            </button>
+          </div>
 
           <input
             type="text"
             value={benefitTitle}
             onChange={(e) => setBenefitTitle(e.target.value)}
-            placeholder="Co jsi udělal pro sklad?"
+            placeholder={t("benefitPlaceholder")}
+            aria-label={t("benefitPlaceholder")}
+            className="benefit-form-field"
             style={{
               width: "100%",
-              padding: 12,
+              minHeight: 50,
+              padding: "13px 15px",
               marginBottom: 12,
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              boxSizing: "border-box",
+              borderRadius: 12,
+              border: "1px solid #d5deea",
+              background: "#f8fafc",
+              color: "#0f172a",
+              colorScheme: "light",
+              fontSize: 15,
+              boxShadow: "inset 0 1px 2px rgba(15, 23, 42, .03)",
             }}
           />
 
           <textarea
             value={benefitDescription}
             onChange={(e) => setBenefitDescription(e.target.value)}
-            placeholder="Detailní popis..."
+            placeholder={t("benefitDetail")}
+            aria-label={t("benefitDetail")}
+            className="benefit-form-field"
             style={{
               width: "100%",
-              minHeight: 150,
-              padding: 12,
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              boxSizing: "border-box",
+              minHeight: 180,
+              padding: "14px 15px",
+              borderRadius: 12,
+              border: "1px solid #d5deea",
+              background: "#f8fafc",
+              color: "#0f172a",
+              colorScheme: "light",
+              fontFamily: "inherit",
+              fontSize: 15,
+              lineHeight: 1.6,
+              resize: "vertical",
+              boxShadow: "inset 0 1px 2px rgba(15, 23, 42, .03)",
             }}
           />
 
-          <div style={{ marginTop: 20 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
             <button
               type="button"
               onClick={handleBenefitSubmit}
               disabled={sendingBenefit}
               style={{
-                background: "#22c55e",
-                color: "white",
-                border: "none",
-                padding: "12px 18px",
-                borderRadius: 8,
+                ...primaryActionButton,
+                minWidth: 130,
+                opacity: sendingBenefit ? 0.65 : 1,
                 cursor: sendingBenefit ? "not-allowed" : "pointer",
               }}
             >
-              {sendingBenefit ? "Odesílám..." : "Odeslat"}
+              <span aria-hidden="true">➤</span>
+              {sendingBenefit ? t("sending") : t("send")}
             </button>
 
             <button
               type="button"
               onClick={() => setPage("dashboard")}
-              style={{
-                background: "#94a3b8",
-                color: "white",
-                border: "none",
-                padding: "12px 18px",
-                borderRadius: 8,
-                cursor: "pointer",
-                marginLeft: 10,
-              }}
+              style={secondaryActionButton}
             >
-              Zpět
+              <span aria-hidden="true">←</span>
+              {t("back")}
             </button>
           </div>
         </div>
@@ -566,13 +892,13 @@ export default function App() {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-          color: "white",
-          fontSize: "24px",
-          fontWeight: "bold",
+          background: "radial-gradient(circle at 78% 18%, rgba(59,130,246,.28), transparent 28%), linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
         }}
       >
-        📊 Načítání aplikace...
+        <div style={{ color: "white", display: "flex", alignItems: "center", gap: 14, fontSize: 18, fontWeight: 700 }}>
+          <span style={{ width: 42, height: 42, borderRadius: 14, display: "grid", placeItems: "center", background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.16)" }}>📊</span>
+          {t("loading")}
+        </div>
       </div>
     );
   }
@@ -585,112 +911,159 @@ export default function App() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)",
-          padding: 20,
+          background: "radial-gradient(circle at 78% 18%, rgba(59,130,246,.32), transparent 25%), radial-gradient(circle at 12% 82%, rgba(37,99,235,.24), transparent 30%), linear-gradient(135deg, #0f172a 0%, #172554 58%, #1e3a8a 100%)",
+          padding: "24px",
         }}
       >
         <div
           style={{
-            width: 420,
-            background: "white",
-            borderRadius: 24,
-            padding: 40,
-            boxShadow: "0 25px 60px rgba(0,0,0,0.3)",
+            width: "min(440px, 100%)",
+            background: "rgba(255,255,255,.98)",
+            borderRadius: 28,
+            padding: "28px 34px 34px",
+            boxShadow: "0 30px 80px rgba(2,6,23,.42), inset 0 1px 0 rgba(255,255,255,.8)",
+            position: "relative",
           }}
         >
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <button type="button" onClick={toggleLanguage} style={secondaryActionButton}>
+              {language === "cs" ? "🇬🇧 English" : "🇨🇿 Čeština"}
+            </button>
+          </div>
           <div
             style={{
-              fontSize: 60,
+              width: 78,
+              height: 78,
+              margin: "4px auto 14px",
+              borderRadius: 22,
+              background: "linear-gradient(145deg,#eff6ff,#dbeafe)",
+              boxShadow: "0 12px 28px rgba(37,99,235,.14)",
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              gap: 5,
+              padding: "20px 16px",
               textAlign: "center",
-              marginBottom: 10,
+              fontSize: 0,
             }}
           >
-            📊
+            <span style={{ width: 12, height: 28, borderRadius: 4, background: "#60a5fa" }} />
+            <span style={{ width: 12, height: 38, borderRadius: 4, background: "#22c55e" }} />
+            <span style={{ width: 12, height: 22, borderRadius: 4, background: "#ec4899" }} />
+            <span style={{ width: 12, height: 32, borderRadius: 4, background: "#2563eb" }} />
           </div>
 
           <h1
             style={{
               textAlign: "center",
-              marginBottom: 10,
-              fontSize: 32,
+              margin: "0 0 6px",
+              fontSize: 30,
+              lineHeight: 1.2,
+              color: "#172554",
+              letterSpacing: "-0.8px",
             }}
           >
-            Evidence chyb
+            {t("evidence")}
           </h1>
 
           <p
             style={{
               textAlign: "center",
               color: "#64748b",
-              marginBottom: 30,
+              marginBottom: 24,
+              fontSize: 15,
             }}
           >
-            Přihlášení zaměstnance
+            {t("loginSubtitle")}
           </p>
 
-          <input
-            type="text"
-            placeholder="Osobní číslo"
-            value={personalNumber}
-            onChange={(e) => setPersonalNumber(e.target.value)}
-            style={{
-              width: "100%",
-              padding: 14,
-              marginBottom: 14,
-              borderRadius: 12,
-              border: "1px solid #cbd5e1",
-              fontSize: 16,
-              boxSizing: "border-box",
-            }}
-          />
-
-          <input
-            type="password"
-            placeholder="PIN"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            style={{
-              width: "100%",
-              padding: 14,
-              marginBottom: 14,
-              borderRadius: 12,
-              border: "1px solid #cbd5e1",
-              fontSize: 16,
-              boxSizing: "border-box",
-            }}
-          />
-
-          {error && (
-            <div
-              style={{
-                color: "#ef4444",
-                marginBottom: 15,
-                textAlign: "center",
-                fontWeight: "bold",
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleLogin}
-            disabled={loading}
-            style={{
-              width: "100%",
-              padding: 14,
-              background: "#2563eb",
-              color: "white",
-              border: "none",
-              borderRadius: 12,
-              cursor: loading ? "not-allowed" : "pointer",
-              fontWeight: "bold",
-              fontSize: 16,
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleLogin();
             }}
           >
-            {loading ? "Přihlašování..." : "Přihlásit"}
-          </button>
+            <label style={{ display: "block", color: "#475569", fontSize: 13, fontWeight: 700, marginBottom: 7 }}>
+              {t("personalNumber")}
+            </label>
+            <input
+              type="text"
+              autoComplete="username"
+              placeholder={t("personalNumber")}
+              value={personalNumber}
+              onChange={(e) => setPersonalNumber(e.target.value)}
+              style={{
+                width: "100%",
+                height: 52,
+                padding: "0 16px",
+                marginBottom: 16,
+                borderRadius: 12,
+                border: "1px solid #dbe3ef",
+                background: "#f8fafc",
+                color: "#0f172a",
+                fontSize: 16,
+                outline: "none",
+              }}
+            />
+
+            <label style={{ display: "block", color: "#475569", fontSize: 13, fontWeight: 700, marginBottom: 7 }}>
+              PIN
+            </label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              placeholder="PIN"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              style={{
+                width: "100%",
+                height: 52,
+                padding: "0 16px",
+                marginBottom: 18,
+                borderRadius: 12,
+                border: "1px solid #dbe3ef",
+                background: "#f8fafc",
+                color: "#0f172a",
+                fontSize: 16,
+                outline: "none",
+              }}
+            />
+
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  color: "#dc2626",
+                  marginBottom: 14,
+                  textAlign: "center",
+                  fontWeight: 700,
+                  fontSize: 14,
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                width: "100%",
+                height: 52,
+                background: "linear-gradient(135deg,#2563eb,#1d4ed8)",
+                color: "white",
+                border: "none",
+                borderRadius: 12,
+                cursor: loading ? "not-allowed" : "pointer",
+                fontWeight: 800,
+                fontSize: 16,
+                boxShadow: "0 12px 24px rgba(37,99,235,.24)",
+                opacity: loading ? 0.72 : 1,
+              }}
+            >
+              {loading ? t("loggingIn") : t("login")}
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -759,7 +1132,7 @@ export default function App() {
                     margin: "2px 0",
                   }}
                 >
-                  Osobní číslo: {employee.personalNumber}
+                  {t("personalNumberLabel")} {employee.personalNumber}
                 </p>
 
                 <p
@@ -769,43 +1142,34 @@ export default function App() {
                     fontSize: 18,
                   }}
                 >
-                  Evidence chyb • {currentMonth}
+                  {t("evidence")} • {currentMonth}
                 </p>
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={toggleLanguage}
+                style={secondaryActionButton}
+              >
+                {language === "cs" ? "🇬🇧 English" : "🇨🇿 Čeština"}
+              </button>
               {adminViewSnapshot && (
                 <button
                   type="button"
                   onClick={returnToAdmin}
-                  style={{
-                    background: "#2563eb",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 19,
-                    padding: "16px 25px",
-                    cursor: "pointer",
-                    fontWeight: "bold",
-                  }}
+                  style={{ ...primaryActionButton, borderRadius: 999 }}
                 >
-                  Zpět na můj účet
+                  {t("returnToAdmin")}
                 </button>
               )}
               <button
                 type="button"
                 onClick={logout}
-                style={{
-                  background: "#910528d7",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 19,
-                  padding: "16px 25px",
-                  cursor: "pointer",
-                  fontWeight: "bold",
-                }}
+                style={dangerActionButton}
               >
-                Odhlásit
+                {t("logout")}
               </button>
             </div>
           </div>
@@ -827,8 +1191,6 @@ export default function App() {
           </div>
         )}
 
-        {!isBrigadnik && (
-          <>
         {userRole === "superadmin" && !adminViewSnapshot && (
           <div
             style={{
@@ -875,8 +1237,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
-            <p>Počet zaměstnanců: {allUsers.length}</p>
 
             <div
               style={{
@@ -937,28 +1297,6 @@ export default function App() {
               </p>
             )}
 
-            <div
-              style={{
-                maxHeight: 300,
-                overflowY: "auto",
-                marginTop: 20,
-              }}
-            >
-              {allUsers.map((user) => (
-                <div
-                  key={user.osCislo}
-                  style={{
-                    background: "rgba(255,255,255,0.1)",
-                    padding: 10,
-                    borderRadius: 10,
-                    marginBottom: 10,
-                  }}
-                >
-                  {user.jmeno} | {user.osCislo} | {user.smena}
-                </div>
-              ))}
-            </div>
-
             <p style={{ marginTop: 10 }}>Přihlášen jako SuperAdmin.</p>
           </div>
         )}
@@ -971,6 +1309,7 @@ export default function App() {
             marginBottom: 45,
           }}
         >
+          {!isBrigadnik && (
           <div style={card}>
             <div style={label}>👤 MŮJ PROFIL</div>
             <div
@@ -993,57 +1332,73 @@ export default function App() {
               )}
             </div>
           </div>
+          )}
 
+          {!isBrigadnik && (
           <div style={card}>
-            <div style={label}>📊 Evidované chyby</div>
+            <div style={{ ...label, justifyContent: "center" }}>📊 Evidované chyby</div>
             <div
               style={{
                 fontSize: 38,
                 fontWeight: "bold",
                 color: qualityColor,
+                textAlign: "center",
               }}
             >
-              {errors.length}
+              {currentMonthErrors.length}
             </div>
             <div
               style={{
                 color: "#040505",
                 marginTop: 10,
                 fontSize: 18,
+                textAlign: "center",
               }}
             >
               Počet evidovaných chyb
             </div>
           </div>
+          )}
 
-          {!adminViewSnapshot && (
+          {!adminViewSnapshot &&
+            normalizeRole(employee?.position) !== "brigadnik" &&
+            normalizeRole(employee?.role) !== "brigadnik" &&
+            normalizeRole(userRole) !== "brigadnik" && (
           <div style={card}>
-            <div style={label}>⭐ PŘÍNOS PRO SKLAD</div>
+            <div style={{ ...label, justifyContent: "center", textAlign: "center" }}>⭐ PŘÍNOS PRO SKLAD</div>
             <div
               style={{
                 color: "#22c55e",
                 fontWeight: "bold",
                 fontSize: 18,
                 marginBottom: 15,
+                textAlign: "center",
               }}
             >
               Udělal jsi něco navíc?
             </div>
 
-            <button type="button" onClick={() => setPage("benefit")}>
-              ➕ Nahlásit přínos
+            <button
+              type="button"
+              onClick={() => setPage("benefit")}
+              style={{ ...primaryActionButton, width: "100%" }}
+            >
+              <span aria-hidden="true" style={{ fontSize: 17, lineHeight: 1 }}>＋</span>
+              Nahlásit přínos
             </button>
           </div>
           )}
 
+          {!isBrigadnik && (
           <div style={card}>
-            <div style={label}>⭐ Přínosy</div>
+            <div style={{ ...label, justifyContent: "center" }}>⭐ Přínosy</div>
             <div
               style={{
                 marginTop: 15,
                 lineHeight: 2,
                 fontSize: 16,
                 fontWeight: 600,
+                textAlign: "center",
               }}
             >
               <div>⏳ Čekající: {approvedBenefits}</div>
@@ -1054,15 +1409,17 @@ export default function App() {
               
             </div>
           </div>
+          )}
 
           {(employee.role === "employee" || !employee.role) && (
             <div style={card}>
-              <div style={label}>💰 Bonus</div>
+              <div style={{ ...label, justifyContent: "center" }}>💰 Bonus</div>
               <div
                 style={{
                   fontSize: 40,
                   fontWeight: "bold",
                   color: "#2563eb",
+                  textAlign: "center",
                 }}
               >
                 {currentBonus.toLocaleString("cs-CZ")} Kč
@@ -1073,6 +1430,7 @@ export default function App() {
                   marginTop: 10,
                   color: "#64748b",
                   fontSize: 13,
+                  textAlign: "center",
                 }}
               >
                 Po uzávěrce: {finalBonus.toLocaleString("cs-CZ")} Kč
@@ -1102,7 +1460,7 @@ export default function App() {
                 />
               </div>
 
-              <div style={{ marginTop: 10, color: "#334155" }}>
+              <div style={{ marginTop: 10, color: "#334155", textAlign: "center" }}>
                 Aktuální bonus z 2 000 Kč
               </div>
 
@@ -1111,6 +1469,7 @@ export default function App() {
                   color: "#64748b",
                   marginTop: 6,
                   fontSize: 13,
+                  textAlign: "center",
                 }}
               >
                 Uzávěrka za {daysLeft} dní
@@ -1118,15 +1477,19 @@ export default function App() {
             </div>
           )}
 
-          {!adminViewSnapshot && (
+          {!adminViewSnapshot &&
+            normalizeRole(employee?.position) !== "brigadnik" &&
+            normalizeRole(employee?.role) !== "brigadnik" &&
+            normalizeRole(userRole) !== "brigadnik" && (
           <div style={card}>
-            <div style={label}>🤝 Schůzky</div>
+            <div style={{ ...label, justifyContent: "center" }}>🤝 Schůzky</div>
             <div
               style={{
                 fontSize: 20,
                 fontWeight: "bold",
                 color: "#f59e0b",
                 marginBottom: 15,
+                textAlign: "center",
               }}
             >
               Domluvit schůzku
@@ -1134,30 +1497,22 @@ export default function App() {
             <button
               type="button"
               onClick={() => alert("Musíme to opravit 🫡 .")}
-              style={{
-                width: "100%",
-                background: "#0938b9",
-                color: "white",
-                border: "none",
-                borderRadius: 12,
-                padding: "12px 16px",
-                cursor: "pointer",
-                fontWeight: "bold",
-                fontSize: 17,
-              }}
+              style={{ ...primaryActionButton, width: "100%" }}
             >
               📅 Požádat o schůzku
             </button>
           </div>
           )}
 
+          {!isBrigadnik && (
           <div style={card}>
-            <div style={label}>⌚️ Docházka</div>
+            <div style={{ ...label, justifyContent: "center" }}>⌚️ Docházka</div>
             <div
               style={{
                 fontSize: 38,
                 fontWeight: "bold",
                 color: "#8b5cf6",
+                textAlign: "center",
               }}
             >
               {dochazkaBody}
@@ -1166,14 +1521,16 @@ export default function App() {
               style={{
                 color: "#040505",
                 marginTop: 10,
+                textAlign: "center",
               }}
             >
               Body docházky tento měsíc
             </div>
           </div>
+          )}
         </div>
 
-        {errors.length === 0 && (
+        {currentMonthErrors.length === 0 && (
           <div
             style={{
               background: "#dcfce7",
@@ -1185,7 +1542,7 @@ export default function App() {
               fontWeight: "bold",
             }}
           >
-            🏆 Gratulujeme, nemáte evidované žádné chyby.
+            🏆 {t("noErrorsCongrats")}
           </div>
         )}
 
@@ -1256,8 +1613,6 @@ export default function App() {
             </div>
           </div>
         )}
-          </>
-        )}
 
         <div
           style={{
@@ -1269,21 +1624,96 @@ export default function App() {
             overflowX: "auto",
           }}
         >
-          <h3 style={{ marginTop: 0, marginBottom: 20 }}>📋 Historie chyb</h3>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 20,
+            }}
+          >
+            <h3 style={{ margin: 0 }}>📋 {t("history")}</h3>
+            <select
+              aria-label={language === "cs" ? "Vybrat měsíc historie" : "Select history month"}
+              value={selectedHistoryMonth}
+              onChange={(event) => setSelectedHistoryMonth(event.target.value)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                background: "white",
+                color: "#334155",
+                fontWeight: 700,
+              }}
+            >
+              {historyMonthKeys.map((monthKey) => {
+                const [year, month] = monthKey.split("-").map(Number);
+                const label = new Date(year, month - 1, 1).toLocaleDateString(
+                  language === "en" ? "en-GB" : "cs-CZ",
+                  { month: "long", year: "numeric" }
+                );
+                return (
+                  <option key={monthKey} value={monthKey}>
+                    {label.charAt(0).toUpperCase() + label.slice(1)}
+                  </option>
+                );
+              })}
+              <option value="all">
+                {language === "cs" ? "Všechny měsíce" : "All months"}
+              </option>
+            </select>
+          </div>
+
+          {selectedHistoryMonth !== "all" && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                borderRadius: 12,
+                padding: "12px 14px",
+                marginBottom: 16,
+                color: "#1e3a8a",
+              }}
+            >
+              <strong>
+                {language === "cs"
+                  ? `Chyby v tomto měsíci: ${selectedHistoryErrors.length}`
+                  : `Errors this month: ${selectedHistoryErrors.length}`}
+              </strong>
+              {previousHistoryMonthKey && (
+                <span>
+                  {language === "cs"
+                    ? `Minulý měsíc: ${previousHistoryErrors.length} • `
+                    : `Previous month: ${previousHistoryErrors.length} • `}
+                  {selectedHistoryErrors.length < previousHistoryErrors.length
+                    ? (language === "cs" ? "Výborně, máme zlepšení!" : "Great, we improved!")
+                    : selectedHistoryErrors.length === previousHistoryErrors.length
+                      ? (language === "cs" ? "Stejný počet jako minulý měsíc." : "Same as the previous month.")
+                      : (language === "cs" ? "Máme prostor na zlepšení." : "We have room to improve.")}
+                </span>
+              )}
+            </div>
+          )}
 
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th style={{ ...th, minWidth: "130px" }}>Způsobeno📆</th>
-                <th style={{ ...th, minWidth: "130px" }}>Řešeno📅</th>
-                <th style={th}>Kategorie</th>
-                <th style={th}>FA/OBJ/BOX</th>
-                <th style={th}>Popis chyby</th>
-                <th style={th}>Foto</th>
+                <th style={{ ...th, minWidth: "130px" }}>{t("caused")} 📆</th>
+                <th style={{ ...th, minWidth: "130px" }}>{t("resolved")} 📅</th>
+                <th style={th}>{t("category")}</th>
+                <th style={th}>{t("reference")}</th>
+                <th style={th}>{t("description")}</th>
+                <th style={th}>{t("photo")}</th>
               </tr>
             </thead>
             <tbody>
-              {errors.length === 0 ? (
+              {selectedHistoryErrors.length === 0 ? (
                 <tr>
                   <td
                     colSpan={6}
@@ -1292,15 +1722,15 @@ export default function App() {
                       padding: 30,
                     }}
                   >
-                    Nebyly nalezeny žádné chyby.
+                    {t("noErrors")}
                   </td>
                 </tr>
               ) : (
-                [...errors]
+                [...selectedHistoryErrors]
                   .sort(
                     (a, b) =>
-                      new Date(b.reseno || "").getTime() -
-                      new Date(a.reseno || "").getTime()
+                      (parseErrorDate(b.reseno)?.getTime() ?? 0) -
+                      (parseErrorDate(a.reseno)?.getTime() ?? 0)
                   )
                   .map((item, index) => (
     <tr
@@ -1309,13 +1739,13 @@ export default function App() {
         background: item.foto ? "#f8e42a" : "#ffffff",
       }}
     >
-      <td style={td}>{formatDate(item.zpusobeno)}</td>
+      <td style={td}>{formatDate(item.zpusobeno, language)}</td>
 
-      <td style={td}>{formatDate(item.reseno)}</td>
+      <td style={td}>{formatDate(item.reseno, language)}</td>
 
       <td style={td}>
         {isBrigadnik ? (
-          item.kategorie || "—"
+          translateCategory(item.kategorie)
         ) : (
         <span
           style={{
@@ -1367,7 +1797,7 @@ export default function App() {
             textAlign: "center",
           }}
         >
-          {item.kategorie || "—"}
+          {translateCategory(item.kategorie)}
         </span>
         )}
 
@@ -1418,7 +1848,7 @@ export default function App() {
                 fontWeight: 700,
               }}
             >
-              Bez dopadu na bonus
+              {t("allGood")}
             </span>
           )}
         </div>
@@ -1434,18 +1864,11 @@ export default function App() {
           <button
             type="button"
             onClick={() =>
-              setSelectedPhoto(normalizePhotoUrl(item.foto || ""))
+              setSelectedPhoto(item.foto || "")
             }
-            title="Zobrazit fotografii"
-            style={{
-              background: "#2563eb",
-              color: "white",
-              border: "none",
-              borderRadius: "8px",
-              padding: "6px 10px",
-              cursor: "pointer",
-              fontSize: "16px",
-            }}
+            title={t("photoTitle")}
+            aria-label={t("photoTitle")}
+            style={photoActionButton}
           >
             📷
           </button>
@@ -1471,28 +1894,84 @@ export default function App() {
               justifyContent: "center",
               alignItems: "center",
               zIndex: 9999,
+              padding: 20,
             }}
           >
             <div
+              onClick={(event) => event.stopPropagation()}
               style={{
                 background: "white",
                 padding: 20,
                 borderRadius: 12,
-                maxWidth: "80%",
-                maxHeight: "80%",
-                overflow: "hidden",
+                maxWidth: "90vw",
+                maxHeight: "90vh",
+                overflow: "auto",
+                position: "relative",
               }}
             >
-              <img
-                src={selectedPhoto}
-                alt="Fotka chyby"
-                style={{
-                  display: "block",
-                  maxWidth: "100%",
-                  maxHeight: "80vh",
-                  borderRadius: 12,
-                }}
-              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12 }}>
+                <a
+                  href={getPhotoOriginalUrl(selectedPhoto)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: "#1d4ed8",
+                    textDecoration: "none",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    padding: "8px 10px",
+                  }}
+                >
+                  {language === "cs" ? "Otevřít původní" : "Open original"}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPhoto(undefined)}
+                  style={{
+                    border: "none",
+                    background: "#e2e8f0",
+                    color: "#334155",
+                    borderRadius: 8,
+                    width: 36,
+                    height: 36,
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
+                  aria-label={language === "cs" ? "Zavřít fotografii" : "Close photo"}
+                >
+                  ×
+                </button>
+              </div>
+              {getDrivePhotoId(selectedPhoto) ? (
+                <iframe
+                  key={selectedPhoto}
+                  title={t("photoAlt")}
+                  src={`https://drive.google.com/file/d/${getDrivePhotoId(selectedPhoto)}/preview`}
+                  style={{
+                    display: "block",
+                    width: "80vw",
+                    height: "80vh",
+                    maxWidth: 1000,
+                    maxHeight: 800,
+                    border: "none",
+                    borderRadius: 12,
+                    background: "#f8fafc",
+                  }}
+                  allow="fullscreen"
+                />
+              ) : (
+                <img
+                  key={selectedPhoto}
+                  src={selectedPhoto}
+                  alt={t("photoAlt")}
+                  style={{
+                    display: "block",
+                    maxWidth: "80vw",
+                    maxHeight: "80vh",
+                    borderRadius: 12,
+                  }}
+                />
+              )}
             </div>
           </div>
         )}
